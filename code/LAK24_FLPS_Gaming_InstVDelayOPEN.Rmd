@@ -331,6 +331,175 @@ var_alpha/var_total
 ## Data/Models in STAN
 ### data
 ```{r}
+### data
+```{r}
+### isolate Instant and Delayed conditions
+
+InstVDelay_dat <-  ximp %>%
+  filter(rdm_condition %in% c("ASSISTments", "BAU")) %>%
+  left_join(
+    outcomeDat,
+    by = "StuID"
+  ) %>%
+  mutate(
+    race_ethnicity = as.factor(race_ethnicity),
+    StuID = as.factor(StuID),
+    race_ethnicity_Hispanic = as.factor(ifelse(is.na(race_ethnicity), NA,
+                                               ifelse(race_ethnicity == 1, 1, 0))),
+    race_ethnicity_Asian_pacific = as.factor(ifelse(is.na(race_ethnicity), NA,
+                                                    ifelse(race_ethnicity == 3 | race_ethnicity == 5, 1, 0))),
+    race_ethnicity_Black = as.factor(ifelse(is.na(race_ethnicity), NA,
+                                            ifelse(race_ethnicity == 4, 1, 0))),
+    race_ethnicity_Other = as.factor(ifelse(is.na(race_ethnicity), NA,
+                                            ifelse(race_ethnicity != 1 &
+                                                     race_ethnicity != 3 &
+                                                     race_ethnicity != 5 &
+                                                     race_ethnicity != 4
+                                                   , 1, 0))),
+    across(contains("score"), ~ scale(.)[, 1]),
+    pre_PS_total_RT_sec_log= log(pre_PS_total_RT_sec),
+    pre_PS_part1_RT_sec_log=log(pre_PS_part1_RT_sec),
+    pre_PS_part2E_RT_sec_log=log(pre_PS_part2E_RT_sec),
+    pre_PS_part2NE_RT_sec_log=log(pre_PS_part2NE_RT_sec),
+    across(contains("log"), ~ scale(.)[, 1]),
+           ) %>%
+  # put na_count 
+  left_join(
+    preDat %>% dplyr::select(StuID, na_count) %>%
+      mutate(StuID = as.factor(StuID)),
+    by = "StuID"
+  ) %>%
+  mutate_if(is.numeric, scale)%>%
+     left_join(gaming_res %>%
+              mutate(
+                StuID = as.factor(StuID),
+                gaming_binary = as.factor(gaming_any),
+                clip_start_problem = as.factor(clip_start_problem)
+              ) %>%
+              dplyr::select(StuID, clip_start_problem, gaming_binary),
+            by = "StuID")  %>%
+  # left_join(gaming %>%
+  #             ungroup() %>%
+  #             filter(rdm_condition == "ASSISTments",
+  #                    any_gamers == 1
+  #             ) %>%
+  #             dplyr::select(-rdm_condition) %>%
+  #             mutate(
+  #               StuID = as.factor(StuID),
+  #               gaming_binary = as.factor(gaming_binary),
+  #               clip_start_problem = as.factor(clip_start_problem)
+  #             ) %>%
+  #             dplyr::select(StuID, clip_start_problem, gaming_binary, problem_type, graded),
+  #           by = "StuID")  %>%
+  filter(!(is.na(gaming_binary) & rdm_condition == "ASSISTments")) %>%
+  mutate(
+    IEP = as.numeric(IEP),
+    EIP = as.numeric(EIP),
+    ESOL = as.numeric(ESOL),
+    GIFTED = as.numeric(GIFTED),
+    inperson = as.numeric(inperson),
+    clip_start_problem = as.numeric(clip_start_problem),
+    StuID_con = as.numeric(factor( StuID)),
+    TeaIDPre_con = as.numeric(factor( TeaIDPre)),
+    SchIDPre_con = as.numeric(factor( SchIDPre)),
+    gaming_con = ifelse(is.na(gaming_binary) == T, NA,
+                                    ifelse(gaming_binary == 1, 1, 0))
+    ,
+    Z = ifelse(
+      rdm_condition == "ASSISTments", 0, 1
+    ))     
+  
+# 
+# head(table(InstVDelay_dat$StuID_con))
+# table(InstVDelay_dat$TeaIDPre_con)
+# table(InstVDelay_dat$SchIDPre_con)
+# 
+# table(is.na(InstVDelay_dat$gaming_binary),InstVDelay_dat$rdm_condition)
+# table(InstVDelay_dat$rdm_condition)
+# table(InstVDelay_dat$Z)
+# length(InstVDelay_dat[is.na(InstVDelay_dat$gaming_binary),]$StuID)
+# 
+# # InstVDelay_dat$StuID_con <- as.numeric(as.factor( InstVDelay_dat$StuID))
+# # InstVDelay_dat$gaming_con <- ifelse(is.na(InstVDelay_dat$gaming_binary) == T, NA,
+# #                                     ifelse(InstVDelay_dat$gaming_binary == 1, 1, 0))
+# table(InstVDelay_dat$gaming_con, InstVDelay_dat$gaming_binary)
+# table(InstVDelay_dat$gaming_con, InstVDelay_dat$gaming_binary)
+
+X <- model.frame(StuID_con~ StuID_con +
+ # pre_total_math_score +
+    pre_sub_P_score +
+    pre_sub_C_score +   
+    pre_sub_F_score +   
+    pre_math_completed_num +  
+    pre_total_time_on_tasks +
+    pre_MA_total_score +
+    I(pre_MA_total_score^2) +
+    pre_negative_reaction_score +
+    pre_numerical_confindence_score +
+    pre_MSE_total_score +
+ #   pre_PS_tasks_total_score +
+    pre_PS_part1_score +
+    pre_PS_part2E_score +
+    pre_PS_part2NE_score +
+  #  pre_PS_completed_num +
+  #  pre_PS_total_RT_sec_log +
+    pre_PS_part1_RT_sec_log +
+    pre_PS_part2E_RT_sec_log +
+    pre_PS_part2NE_RT_sec_log +
+    Scale_Score5 +
+    FEMALE +
+    race_ethnicity_Hispanic +
+    race_ethnicity_Asian_pacific +
+    race_ethnicity_Black +
+    IEP +
+    EIP +
+    ESOL +
+    GIFTED +
+    inperson +
+    na_count 
+     , data = InstVDelay_dat) %>% group_by(StuID_con) %>% slice(1) %>% arrange(StuID_con) %>% model.matrix(~ ., data = .)
+#dim(X)
+X <- X[,-c(1,2)]
+#head(X)
+
+
+teach_nesting <- InstVDelay_dat %>% dplyr::select(StuID_con, TeaIDPre_con) %>% arrange(StuID_con) %>% distinct()
+school_nesting <- InstVDelay_dat %>% dplyr::select(StuID_con, SchIDPre_con) %>% arrange(StuID_con) %>% distinct()
+#class_nesting <- InstVDelay_dat %>% dplyr::select(StuID_con, ClaIDPre) %>% arrange(StuID_con) %>% distinct()
+problemattempt_nesting <- InstVDelay_dat %>% filter(rdm_condition == "ASSISTments", is.na(clip_start_problem) == F) %>% dplyr::select(StuID_con, clip_start_problem, gaming_con) %>% arrange(StuID_con) 
+posttest <- InstVDelay_dat %>% dplyr::select(StuID_con, post_total_math_score, Z) %>% arrange(StuID_con) %>% distinct() 
+table(posttest$rdm_condition)
+
+
+stanDat <-  list(
+  
+                 # samples
+                 nproblemsworked = nrow(problemattempt_nesting),
+                 nstud= length(unique(InstVDelay_dat$StuID_con)),
+                 nteacher = length(unique(teach_nesting$TeaIDPre_con)),
+               #  nclass = length(unique(class_nesting$ClaIDPre)),
+                 nschool = length(unique(school_nesting$SchIDPre_con)),
+                 nproblem = length(unique(problemattempt_nesting$clip_start_problem)),
+                 ncov = ncol(X),
+
+                 
+                 # indices
+                 teacher = as.numeric(as.factor(teach_nesting$TeaIDPre_con)),
+             #    class = as.numeric(as.factor(class_nesting$ClaIDPre)),
+                 school = as.numeric(as.factor(school_nesting$SchIDPre_con)),
+                 problem = as.numeric(as.factor(problemattempt_nesting$clip_start_problem)),  # this has NAs for students in the control
+ #                world = as.numeric(as.factor(problemattempt_nesting$world_id)),  # this has NAs for students in the control
+                 studentM = (problemattempt_nesting$StuID_con), # not sure that this is correct 
+                 
+                 Z = posttest$Z,
+                 
+                 Y= posttest$post_total_math_score[,1], 
+
+                 X =as.matrix(X),
+                 
+                 gaming=problemattempt_nesting$gaming_con
+)
+
 
 saveRDS(stanDat, "/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/data/LAK24_Data/LAK_RQ2_FLPS_gaming_InstVDelay_stan.RData")
 
@@ -632,8 +801,6 @@ ggplot(studEff_prb, aes(x =`alpha_logit`, fill = as.factor(Z))) +
 
 
 ### traceplots
-
-
 ```{r}
 traceplot(
   RQ2_Mod,
