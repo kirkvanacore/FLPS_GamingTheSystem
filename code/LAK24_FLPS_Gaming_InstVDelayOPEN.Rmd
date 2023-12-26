@@ -1,0 +1,663 @@
+---
+title: "LAK24_FLPS_Gaming"
+author: "Kirk Vanacore"
+date: "9/7/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Packages
+```{r packages}
+packages = c(
+ # "tidyverse",
+  "plyr",
+  "rstanarm",
+  "ggExtra",
+  "xts",
+  "lubridate",
+  "readxl",
+  "data.table",
+  "RSQLite",
+  "DBI",
+  "mice"
+  ,"psych",
+  "stringr",
+  "sjmisc",
+  "sjPlot",
+  "lme4",
+  "campfin",
+  "pROC",
+  "cutpointr",
+  "missForest",
+  "corrplot",
+  "tidyverse",
+  "arm",
+  "splines",
+  'fastDummies',
+  "rstan",
+  "arm",
+  "doParallel",
+  "dplyr",
+  "MASS",
+  "latex2exp",
+  "splines",
+  "pROC",
+  "xtable"
+)
+#load install
+package.check <- lapply(
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      library(x, character.only = TRUE)
+    }
+  } 
+) 
+
+require(dplyr)
+require(doParallel)
+require(rstan)
+rm(packages)
+cores <- detectCores()
+registerDoParallel(cores=10)
+```
+# Train Measurement Model
+This is the process of selecting variables for the measurement model. The final measurement submodel is run similtan
+
+## Train/Test Data 
+```{r}
+meas_model_data <- read.csv("/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/data/LAK24_Data/meas_model_data.csv")
+dim(meas_model_data)
+# separate the test and train set 
+
+
+train_samp <- sample(meas_model_data$ID, size = round(length(meas_model_data$StuID)*.8))
+mod1_dat_train <- meas_model_data %>%
+  filter(ID %in% train_samp)
+mod1_dat_test <- meas_model_data %>%
+  filter(!ID %in% train_samp
+  ) 
+
+table(mod1_dat_test$gaming_binary)/length(mod1_dat_test$gaming_binary)
+table(mod1_dat_train$gaming_binary)/length(mod1_dat_train$gaming_binary)
+```
+
+## Measurement Model
+```{r}
+
+# check for colinairty
+meas_cor<-as.data.frame((cor(as.matrix(mod1_dat_train %>%dplyr::select(
+ pre_total_math_score,
+  pre_sub_P_score ,
+    pre_sub_C_score ,
+     pre_sub_F_score ,
+     pre_math_completed_num ,
+     pre_total_time_on_tasks ,
+     pre_MA_total_score ,
+    pre_negative_reaction_score ,
+    pre_numerical_confindence_score ,
+    pre_MSE_total_score ,
+    pre_PS_tasks_total_score ,
+    pre_PS_part1_score ,
+    pre_PS_part2E_score ,
+    pre_PS_part2NE_score ,
+    pre_PS_completed_num ,
+    pre_PS_total_RT_sec_log ,
+    pre_PS_part1_RT_sec_log ,
+    pre_PS_part2E_RT_sec_log ,
+    pre_PS_part2NE_RT_sec_log ,
+    Scale_Score5 
+   
+) ))))
+View(meas_cor)
+getOption("max.print")
+
+```
+
+```{r}
+mm_1null <- stan_glmer(
+  gaming_binary ~
+    (1 | clip_start_problem) +
+    (1 | StuID/TeaIDPre)
+  ,
+  data = mod1_dat_train,
+  chains=5, iter=500, warmup=400, cores = 10,
+  family = binomial())
+
+mm_1null_lmer <- glmer(
+  gaming_binary ~
+    (1 | clip_start_problem) +
+    (1 | StuID)
+  ,
+  data = mod1_dat_train,
+ # chains=5, iter=500, warmup=400, cores = 10,
+  family = binomial)
+summary(mm_1null_lmer)
+
+tab_model(mm_1null_lmer)
+mm_null_coef<-mm_1null$stan_summary
+
+# the original process for selecting variables was iterative, the final measrement model is below
+mm_1 <- stan_glmer(
+  gaming_binary ~
+    #pre_total_math_score +
+    pre_sub_P_score +
+    pre_sub_C_score +
+    pre_sub_F_score +
+    pre_math_completed_num +
+    log(pre_total_time_on_tasks) +
+    pre_MA_total_score +
+    I(pre_MA_total_score^2) +
+    pre_negative_reaction_score +
+    pre_numerical_confindence_score +
+    pre_MSE_total_score +
+    #pre_PS_tasks_total_score +
+    pre_PS_part1_score +
+    pre_PS_part2E_score +
+    pre_PS_part2NE_score +
+  #  pre_PS_completed_num +
+    pre_PS_total_RT_sec_log +
+    pre_PS_part1_RT_sec_log +
+    pre_PS_part2E_RT_sec_log +
+    pre_PS_part2NE_RT_sec_log +
+    Scale_Score5 +
+    FEMALE +
+    race_ethnicity_Hispanic +
+    race_ethnicity_Asian_pacific +
+    race_ethnicity_Black +
+    IEP +
+    EIP +
+    ESOL +
+    GIFTED +
+    inperson +
+    na_count +
+    (1 | clip_start_problem) +
+    (1 | StuID)
+  ,
+  data = mod1_dat_train,
+  chains=5, iter=1000, warmup=900, cores = 10,
+  family = binomial())
+
+summary(mm_1)
+mm_1$stan_summary
+
+  
+#saveRDS(mm_1, "FLPS_GamingTheSystem/models/measurement_mode2mcmc.rda")
+mm<- readRDS("/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/models/measurement_models/LAK24_Models/measurement_model2mcmc.rda")
+
+```
+
+```{r}
+print(mm2)
+
+mm2_cof <- as.data.frame(mm2$stan_summary)
+
+plot(mm2, "trace", pars = "b[(Intercept) StuID:59]")
+plot(mm2, "trace", pars = "b[(Intercept) StuID:59]")
+plot(mm2, "trace", pars = "b[(Intercept) StuID:59]")
+plot(mm2, "trace", pars = "b[(Intercept) StuID:59]")
+```
+
+```{r}
+traceplot(
+  mm2,
+  inc_warmup = T,
+  pars = c(
+       'b[(Intercept) StuID:59]')
+  )
+
+```
+
+
+```{r}
+mm<- readRDS("/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/models/LAK24_Models/measurement_modelmcmc.rda")
+summary(mm)
+mm$stan_summary
+p_mcmc<-(mm$fitted.values)
+p_test <-posterior_predict(mm, 
+                 newdata = mod1_dat_test,  
+                 allow.new.levels = T,
+                 type = "response"
+)
+#p_test
+pROC::auc(mm$y, p_mcmc)
+pROC::auc(mod1_dat_test$gaming_binary, p_test)
+
+```
+#### Variance Explained
+This script provides the proportion of variance explained in the model by the variables available to both treatment and control. It serves as a measure of how accurately the model will predict replay behavior in the control group.
+```{r prelim_mod_eval} 
+# evaluate model - R_sq
+student <- mod1_dat_train %>%
+dplyr::select(  
+   
+ # pre_total_math_score,
+    pre_sub_P_score,
+    pre_sub_C_score,   
+    pre_sub_F_score,   
+    pre_math_completed_num,  
+    pre_total_time_on_tasks,
+    pre_MA_total_score,
+    pre_negative_reaction_score,
+    pre_numerical_confindence_score,
+    pre_MSE_total_score,
+ #   pre_PS_tasks_total_score,
+    pre_PS_part1_score,
+    pre_PS_part2E_score,
+    pre_PS_part2NE_score,
+  #  pre_PS_completed_num,
+  #  pre_PS_total_RT_sec_log,
+    pre_PS_part1_RT_sec_log,
+    pre_PS_part2E_RT_sec_log,
+    pre_PS_part2NE_RT_sec_log,
+    Scale_Score5,
+    FEMALE,
+    race_ethnicity_Hispanic,
+    race_ethnicity_Asian_pacific,
+    race_ethnicity_Black,
+    IEP,
+    EIP,
+    ESOL,
+    GIFTED,
+    inperson,
+    na_count 
+   ) %>%
+  distinct() 
+
+x = model.matrix(~
+ # pre_total_math_score +
+    pre_sub_P_score +
+    pre_sub_C_score +   
+    pre_sub_F_score +   
+    pre_math_completed_num +  
+    pre_total_time_on_tasks +
+    pre_MA_total_score +
+    I(pre_MA_total_score^2) +
+    pre_negative_reaction_score +
+    pre_numerical_confindence_score +
+    pre_MSE_total_score +
+ #   pre_PS_tasks_total_score +
+    pre_PS_part1_score +
+    pre_PS_part2E_score +
+    pre_PS_part2NE_score +
+  #  pre_PS_completed_num +
+  #  pre_PS_total_RT_sec_log +
+    pre_PS_part1_RT_sec_log +
+    pre_PS_part2E_RT_sec_log +
+    pre_PS_part2NE_RT_sec_log +
+    Scale_Score5 +
+    FEMALE +
+    race_ethnicity_Hispanic +
+    race_ethnicity_Asian_pacific +
+    race_ethnicity_Black +
+    IEP +
+    EIP +
+    ESOL +
+    GIFTED +
+    inperson +
+    na_count 
+    , data = student)
+
+y_hat = x %*%fixef(mm)
+
+# variance explained by variables used in imputation of alpha
+var_alpha<-aphla <-(var(y_hat) + 
+    as.data.frame( VarCorr(mm))[1, 4] + 
+    as.data.frame( VarCorr(mm))[2, 4])
+# variance explained include student
+var_aplhaPLUSst<-(var(y_hat) + 
+    as.data.frame( VarCorr(mm))[1, 4] + 
+    as.data.frame( VarCorr(mm))[2, 4] + 
+    as.data.frame( VarCorr(mm))[3, 4] 
+    )
+# variance explained include student
+var_total<-(var(y_hat) + 
+    as.data.frame( VarCorr(mm))[1, 4] + 
+    as.data.frame( VarCorr(mm))[2, 4] + 
+    as.data.frame( VarCorr(mm))[3, 4] + 
+    as.data.frame( VarCorr(mm))[4, 4] 
+    )
+
+var_alpha/var_aplhaPLUSst
+var_alpha/var_total
+
+
+```
+
+# FLPS Effect of Feedback on Gamers
+## Data/Models in STAN
+### data
+```{r}
+
+saveRDS(stanDat, "/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/data/LAK24_Data/LAK_RQ2_FLPS_gaming_InstVDelay_stan.RData")
+
+str(stanDat)
+
+
+```
+
+
+### run models in Secret Sauce
+```{r}
+
+FLPS_Mod <- stan('FLPS_GamingTheSystem/code/FLPS_Gaming_2Cond.stan',
+            data = stanDat, chains=10, iter=11000, warmup=9000, cores = 10)
+saveRDS(RQ2_Mod, "FLPS_GamingTheSystem/models/FLPS_gaming_InstVDelay_Mod4.rds")
+
+print(RQ2_Mod, par = c("a1", "b0", "b1"))
+
+```
+
+### load model
+```{r}
+FLPS_Mod<-read_rds("/Users/kirkvanacore/Documents/WPI_Analyses/FLPS_GamingTheSystem/models/LAK24_Models/FLPS_gaming_InstVDelay_Mod4.rda")
+```
+
+```{r}
+summary(FLPS_Mod, par = c("a1", "b0", "b1"))$summary
+```
+
+
+```{r}
+a1 = as.data.frame(extract(FLPS_Mod, par = "a1"))
+mean((a1$a1) < 0) 
+
+b0 = as.data.frame(extract(FLPS_Mod, par = "b0"))
+mean((b0$b0) > 0) 
+
+b1 = as.data.frame(extract(FLPS_Mod, par = "b1"))
+mean((b1$b1) < 0)
+```
+
+
+###Model Table
+```{r}
+
+
+
+
+#Measurement Model
+coef_U<-summary(FLPS_Mod, par = c("betaU" ))$summary
+coef_U <- as.data.frame( coef_U)
+row.names(coef_U) <- c(
+  "Algebraic Procedural Knowledge",
+  "Algebraic Conceptual Knowledge",
+  "Algebraic Flexibility Knowledge",
+  "Algebraic Knowledge Items Complete",
+  "Algebraic Knowledge Time (Log)",
+  "Math Anxiety",
+  "Math Anxiety (Squared)",
+  "Math Negitive Reaction",
+  "Math Numerical Confindence",
+  "Math Self Efficacy",
+  "Perceptual Sensitivity Score Part 1",
+  "Perceptual Sensitivity Time Part 1 (Log)",
+  "Perceptual Sensitivity Score Part 2",
+  "Perceptual Sensitivity Time Part 2 (Log)",
+  "Perceptual Sensitivity Score Part 3",
+  "Perceptual Sensitivity Time Part 4 (Log)",
+  "State Test Score",
+  "Female",
+  "Hispanic",
+  "Asian/Pacific Islander",
+  "Black",
+  "IEP",
+  "EIP",
+  "ESOL",
+  "GIFTED",
+  "Inperson Insrutcion",
+  "Missing Data"
+)
+
+# Probabilities - different from zero
+bU<-as.data.frame(extract(FLPS_Mod, par = "betaU"))
+head(bU)
+
+prob_gtZero<-function(v) {
+  mean(v > 0)
+}
+
+prob_ltZero<-function(v) {
+  mean(v < 0)
+}
+mean(bU$betaU.1)
+prob_difZero(bU$betaU.1)
+
+
+mean(bU$betaU.13)
+prob_difZero(bU$prob_difZero)
+
+
+coef_U$`P(>0)` <-unlist(lapply(bU, prob_gtZero))
+coef_U$`P(<0)` <-unlist(lapply(bU, prob_ltZero))
+
+colnames(coef)
+
+coef_U<-coef_U  %>%
+  mutate("Predictors"=rownames(.),
+         " " = " ") %>%
+  dplyr::select(
+    "Predictors",     "Estimate" = mean,
+         "SD" = sd,
+         "P(>0)",
+         "P(<0)",
+          " " 
+         
+         )
+
+
+
+
+#Measurement Model
+coef_Y<-summary(FLPS_Mod, par = c("betaY" ))$summary
+coef_Y <- as.data.frame( coef_Y)
+row.names(coef_Y) <- c(
+ "Algebraic Procedural Knowledge",
+  "Algebraic Conceptual Knowledge",
+  "Algebraic Flexibility Knowledge",
+  "Algebraic Knowledge Items Complete",
+  "Algebraic Knowledge Time (Log)",
+  "Math Anxiety",
+  "Math Anxiety (Squared)",
+  "Math Negitive Reaction",
+  "Math Numerical Confindence",
+  "Math Self Efficacy",
+  "Perceptual Sensitivity Score Part 1",
+  "Perceptual Sensitivity Time Part 1 (Log)",
+  "Perceptual Sensitivity Score Part 2",
+  "Perceptual Sensitivity Time Part 2 (Log)",
+  "Perceptual Sensitivity Score Part 3",
+  "Perceptual Sensitivity Time Part 4 (Log)",
+  "State Test Score",
+  "Female",
+  "Hispanic",
+  "Asian/Pacific Islander",
+  "Black",
+  "IEP",
+  "EIP",
+  "ESOL",
+  "GIFTED",
+  "Inperson Insrutcion",
+  "Missing Data"
+)
+
+
+# Probabilities - different from zero
+bY<-as.data.frame(extract(RQ2_Mod, par = "betaY"))
+
+
+
+coef_Y$`P(>0)` <-unlist(lapply(bY, prob_gtZero))
+coef_Y$`P(<0)` <-unlist(lapply(bY, prob_ltZero))
+
+
+coef_Y<-coef_Y  %>%
+  mutate("Predictors"=rownames(.)) %>%
+  dplyr::select(
+    "Predictors",     "Estimate" = mean,
+         "SD" = sd,
+         "P(>0)",
+         "P(<0)"
+         
+         )
+
+cbind(coef_U, coef_Y)
+
+# effects/interactions
+alpha_beta<-summary(FLPS_Mod, par = c("a1", "b0", "b1"))$summary
+alpha_beta <- as.data.frame( alpha_beta)
+
+ab<-as.data.frame(extract(FLPS_Mod, par =c("a1", "b0", "b1")))
+
+alpha_beta$`P(>0)` =unlist(lapply(ab, prob_gtZero))
+alpha_beta$`P(<0)` =unlist(lapply(ab, prob_ltZero))
+
+
+alpha_beta <- alpha_beta %>%
+  mutate("Predictors"=rownames(.)) %>%
+  dplyr::select(
+    "Predictors",     
+    "Estimate" = mean,
+         "SD" = sd,
+         "P(>0)",
+         "P(<0)"
+    )
+
+table1<-right_join(coef_U, 
+(rbind(alpha_beta, coef_Y)),
+by = "Predictors") %>%
+  mutate(across(where(is.numeric), round, 3))
+colnames(table1) <- c("Predictors", "Estimate", "SD", "P(>0)", "P(<0)", "", "Estimate","SD","P(>0)","P(<0)")
+
+View(table1)
+write_csv(table1, "Table1.csv")
+print(xtable(table1,
+             label = "Fully Latent Principal Statsification Model Parameter Estimates",
+             align = "lcccccccccc"),
+      include.rownames=FALSE)
+print(xtable(table1,
+             label = "Fully Latent Principal Statsification Model Parameter Estimates",
+             align = "llccccccccc"),
+      include.rownames=FALSE)
+```
+
+
+#### usage model
+
+
+```{r}
+studEff<-summary(RQ2_Mod, 
+  pars = c(
+    'studEff'),
+  probs = c(0.025, 0.975))
+
+studEff <- as.data.frame(studEff$summary)
+
+stats::var(studEff$mean)
+mean(studEff$mean)
+quantile(studEff$mean)
+
+studEff$Q <- ifelse(studEff$mean < quantile(studEff$mean)[2], 1,
+                    ifelse(studEff$mean < quantile(studEff$mean)[3], 2,
+                    ifelse(studEff$mean < quantile(studEff$mean)[4], 3,
+                    4
+                           )))
+View(studEff %>% group_by(Q) %>% summarise(alpha = round(mean(mean), 2),
+                                      tau = round(mean(b0$b0)+alpha*(mean(b1$b1)), 2)))
+     
+     
+mean(, group = studEff$Q)
+
+mean(studEff$summary[,1] >=1)
+max(studEff$summary[,1])
+
+```
+
+```{r}
+stud_mu<-summary(RQ2_Mod, 
+  pars = c(
+    'mu_prob'),
+  probs = c(0.025, 0.975))
+
+```
+
+
+```{r}
+hist(exp(studEff$summary[,1])/(1+exp(studEff$summary[,1])))
+
+
+studEff_prb <-
+  cbind(as.data.frame(exp(studEff$summary[, 1]) / (1 + exp(
+    studEff$summary[, 1]
+  ))), (studEff$summary[, 1]), stanDat$Z, stanDat$Y)
+
+colnames(studEff_prb)[1] <- "alpha_prob"
+colnames(studEff_prb)[2] <- "alpha_logit"
+colnames(studEff_prb)[3] <- "Z"
+colnames(studEff_prb)[4] <- "Y"
+
+describe(studEff_prb$alpha_logit)
+describe(studEff_prb$alpha_logit)
+mean(studEff_prb$alpha_logit >= 1)
+quantile(studEff_prb$alpha_logit)
+
+
+
+wilcox.test(studEff_prb$alpha_logit ~  as.factor(studEff_prb$Z))
+describeBy(studEff_prb$alpha_logit, as.factor(studEff_prb$Z))
+
+
+
+
+
+library(latex2exp)
+
+ggplot(studEff_prb[studEff_prb$Z==1, ], aes(x =(`alpha_logit`))) +
+  geom_density( alpha = .8, fill = "gray") +
+  xlab(TeX("$\\alpha_i$")) +
+  theme_classic()
+
+ggplot(studEff_prb, aes(x =`alpha_logit`, fill = as.factor(Z))) +
+  geom_histogram( alpha = .5, position = "identity") +
+  xlab(TeX("$\\alpha_i$")) +
+  theme_classic()
+
+
+```
+
+### Pronesity to replay 
+
+
+### traceplots
+
+
+```{r}
+traceplot(
+  RQ2_Mod,
+  inc_warmup = T,
+  pars = c(
+       'a1',
+    'b0',
+    'b1')
+  )
+traceplot(
+  RQ2_Mod,
+  inc_warmup = T,
+  pars = c(
+       'studEff[1]',
+       'studEff[2]',
+       'studEff[3]',
+       'studEff[4]',
+       'studEff[5]',
+       'studEff[6]',
+       'studEff[7]',
+       'studEff[8]'
+       )
+  )
+```
+
+
+
